@@ -1,7 +1,11 @@
-const BOT_TOKEN = "8512505596:AAFB-QkFLHwhFxguze2ksem_hJYKMbv3wNE";
-const CHAT_ID = "834136202";
+require('dotenv').config(); // подключаем dotenv
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
+const PORT = process.env.PORT || 3000;
 
 module.exports = {
     BOT_TOKEN,
-    CHAT_ID
+    CHAT_ID,
+    PORT
 };

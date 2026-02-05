@@ -1,79 +1,116 @@
-const { BOT_TOKEN, CHAT_ID } = require("./config");
 const express = require("express");
-const https = require("https");
-const axios = require("axios");
+const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
+const TelegramBot = require("node-telegram-bot-api");
+const { BOT_TOKEN, CHAT_ID, PORT } = require("./config");
+
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
-const db = require('./db')
 
+// ===== Middleware =====
+app.use(cors({ origin: "http://localhost:5173", methods: ["GET", "POST"] }));
+app.use(express.json());
 
-// Разрешаем запросы с фронтенда
-app.use(cors({
-    origin: 'http://localhost:5173', // адрес  Vue проекта
-    methods: ['GET', 'POST'],
-}));
-app.use(express.json()); // для JSON
+// ===== Database =====
+const db = new sqlite3.Database("./reviews.db", (err) => {
+    if (err) return console.error("DB error:", err.message);
+    console.log("✅ SQLite connected");
+});
 
+db.run(`
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    text TEXT,
+    rating INTEGER,
+    approved INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`);
+
+// ===== Routes =====
 app.post("/form", async (req, res) => {
     try {
-        const data = req.body; // данные формы: { name, phone, message }
+        const { name, phone, message } = req.body;
+        if (!name || !phone) return res.status(400).json({ error: "Имя и телефон обязательны" });
 
-        if (!data.name || !data.phone) {
-            return res.status(400).json({ status: "error", message: "Имя и телефон обязательны" });
-        }
+        const telegramMessage = `📩 *Новая заявка с сайта*
+👤 Имя: ${name}
+📞 Телефон: ${phone}
+💬 Сообщение: ${message || "Нет"}`;
 
-        console.log("Новая заявка:", data);
-
-        // Формируем сообщение для Telegram
-        const message = `📩 Новая заявка с сайта!
-**Имя:** ${data.name}
-**Телефон:** ${data.phone}
-**Сообщение:** ${data.message || "Нет"}`;
-
-        await axios.post(
-            `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-            {
-                chat_id: CHAT_ID,
-                text: message,
-                parse_mode: "Markdown"
-            },
-            {
-                httpsAgent: new https.Agent({ keepAlive: false })
-            }
-        );
-
-        res.json({ status: "ok", message: "Заявка отправлена!" });
+        await bot.sendMessage(CHAT_ID, telegramMessage, { parse_mode: "Markdown" });
+        res.json({ success: true });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ status: "error", error: err.message });
+        res.status(500).json({ error: "Не удалось отправить заявку" });
     }
 });
-app.post('/reviews',  (req, res) => {
-    const { name, text, rating } = req.body
 
-    if (!name || !text || !rating) {
-        return res.status(400).json({ error: 'Заполните все поля' })
-    }
+app.post("/reviews", (req, res) => {
+    const { name, text, rating } = req.body;
+    if (!name || !text || !rating) return res.status(400).json({ error: "Заполните все поля" });
 
     db.run(
-        `INSERT INTO reviews (name, text, rating) VALUES (?, ?, ?)`,
+        `INSERT INTO reviews (name, text, rating, approved) VALUES (?, ?, ?, 0)`,
         [name, text, rating],
-        function (err) {
-            if (err) return res.status(500).json(err)
-        },
-        res.json({ success: true })
+        function(err) {
+            if (err) return res.status(500).json({ error: "DB error" });
 
-    )
-})
-app.get('/reviews', (req, res) => {
+            const reviewId = this.lastID;
+            const message = `📝 *Новый отзыв*
+👤 ${name}
+⭐ ${rating}
+💬 ${text}`;
+
+            bot.sendMessage(CHAT_ID, message, {
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "✅ Одобрить", callback_data: `approve_${reviewId}` },
+                            { text: "❌ Отклонить", callback_data: `reject_${reviewId}` }
+                        ]
+                    ]
+                }
+            });
+
+            res.json({ success: true });
+        }
+    );
+});
+
+app.get("/reviews", (req, res) => {
     db.all(
         `SELECT * FROM reviews WHERE approved = 1 ORDER BY created_at DESC`,
         [],
         (err, rows) => {
-            if (err) return res.status(500).json(err)
-            res.json(rows)
+            if (err) return res.status(500).json({ error: "DB error" });
+            res.json(rows);
         }
-    )
-})
+    );
+});
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+// ===== Telegram callback =====
+bot.on("callback_query", async (query) => {
+    const [action, id] = query.data.split("_");
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+
+    if (action === "approve") {
+        db.run("UPDATE reviews SET approved = 1 WHERE id = ?", [id]);
+        await bot.editMessageText("✅ Отзыв одобрен", { chat_id: chatId, message_id: messageId });
+    }
+
+    if (action === "reject") {
+        db.run("DELETE FROM reviews WHERE id = ?", [id]);
+        await bot.editMessageText("❌ Отзыв отклонён", { chat_id: chatId, message_id: messageId });
+    }
+
+    bot.answerCallbackQuery(query.id);
+});
+
+// ===== Start server =====
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+});
