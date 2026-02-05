@@ -17,7 +17,7 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
 // ===== Middleware =====
-app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
+app.use(cors({ origin: "https://kinolog-anastasia.netlify.app", methods: ["GET", "POST"] }));
 app.use(express.json());
 
 // ===== Database =====
@@ -118,7 +118,25 @@ bot.on("callback_query", async (query) => {
 
     bot.answerCallbackQuery(query.id);
 });
+app.post("/seed-reviews", (req, res) => {
+    const reviews = req.body; // ожидаем массив объектов {name, text, rating, approved}
 
+    if (!Array.isArray(reviews) || reviews.length === 0) {
+        return res.status(400).json({ error: "Неверный формат данных" });
+    }
+
+    const placeholders = reviews.map(() => "(?, ?, ?, ?)").join(",");
+    const values = reviews.flatMap(r => [r.name, r.text, r.rating, r.approved || 0]);
+
+    db.run(
+        `INSERT INTO reviews (name, text, rating, approved) VALUES ${placeholders}`,
+        values,
+        function(err) {
+            if (err) return res.status(500).json({ error: "DB error", details: err.message });
+            res.json({ success: true, inserted: this.changes });
+        }
+    );
+});
 // ===== Start server =====
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
