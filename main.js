@@ -2,13 +2,22 @@ const express = require("express");
 const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
 const TelegramBot = require("node-telegram-bot-api");
-const { BOT_TOKEN, CHAT_ID, PORT } = require("./config");
+
+// ===== Environment variables =====
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
+const PORT = process.env.PORT || 3000;
+
+if (!BOT_TOKEN || !CHAT_ID) {
+    console.error("❌ BOT_TOKEN или CHAT_ID не заданы!");
+    process.exit(1);
+}
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
 // ===== Middleware =====
-app.use(cors({ origin: "http://localhost:5173", methods: ["GET", "POST"] }));
+app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
 app.use(express.json());
 
 // ===== Database =====
@@ -18,14 +27,14 @@ const db = new sqlite3.Database("./reviews.db", (err) => {
 });
 
 db.run(`
-CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    text TEXT,
-    rating INTEGER,
-    approved INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
+    CREATE TABLE IF NOT EXISTS reviews (
+                                           id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                           name TEXT,
+                                           text TEXT,
+                                           rating INTEGER,
+                                           approved INTEGER DEFAULT 0,
+                                           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
 `);
 
 // ===== Routes =====
@@ -54,7 +63,7 @@ app.post("/reviews", (req, res) => {
     db.run(
         `INSERT INTO reviews (name, text, rating, approved) VALUES (?, ?, ?, 0)`,
         [name, text, rating],
-        function(err) {
+        function (err) {
             if (err) return res.status(500).json({ error: "DB error" });
 
             const reviewId = this.lastID;
