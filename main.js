@@ -17,7 +17,7 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
 // ===== Middleware =====
-app.use(cors({ origin: "https://kinolog-anastasia.netlify.app", methods: ["GET", "POST"] }));
+app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
 app.use(express.json());
 
 // ===== Database =====
